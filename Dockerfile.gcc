@@ -1,0 +1,34 @@
+FROM maven:3.8.5-jdk-11 AS build-image
+
+ARG GRAAL_VERSION="22.1.0"
+
+COPY . /build
+
+RUN apt update && apt install -y wget build-essential
+
+RUN wget https://github.com/graalvm/graalvm-ce-builds/releases/download/vm-${GRAAL_VERSION}/graalvm-ce-java11-linux-amd64-${GRAAL_VERSION}.tar.gz && \
+    tar -xvf graalvm-ce-java11-linux-amd64-${GRAAL_VERSION}.tar.gz
+
+ARG RESULT_LIB="/musl"
+RUN mkdir ${RESULT_LIB} && \
+    curl -L -o musl.tar.gz https://more.musl.cc/10.2.1/x86_64-linux-musl/x86_64-linux-musl-native.tgz && \
+    tar -xvzf musl.tar.gz -C ${RESULT_LIB} --strip-components 1
+
+RUN curl -L -o zlib.tar.gz https://zlib.net/zlib-1.2.12.tar.gz && \
+    mkdir zlib && tar -xvzf zlib.tar.gz -C zlib --strip-components 1 && \
+    cd zlib && ./configure --static --prefix=/musl && \
+    make && make install && \
+    cd / && rm -rf /zlib && rm -f /zlib.tar.gz
+ENV PATH="/graalvm-ce-java11-${GRAAL_VERSION}/bin:/musl/bin:${PATH}"
+
+RUN gu install native-image
+
+WORKDIR /build
+
+RUN mvn clean package -Pnative -Dquarkus.native.additional-build-args="--static","--libc=musl"
+
+FROM scratch
+
+COPY --from=build-image /build/target/code-with-quarkus-1.0.0-SNAPSHOT-runner /
+
+ENTRYPOINT [ "/code-with-quarkus-1.0.0-SNAPSHOT-runner" ]
